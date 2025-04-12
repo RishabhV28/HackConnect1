@@ -23,7 +23,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   
   // Query to fetch current user
   const { data, isLoading } = useQuery<Organization | null>({
-    queryKey: ["/api/auth/me"],
+    queryKey: ["/api/me"],
     queryFn: async ({ queryKey }) => {
       try {
         const res = await fetch(queryKey[0] as string, {
@@ -52,12 +52,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Login mutation
   const loginMutation = useMutation({
     mutationFn: async (credentials: Login) => {
-      const res = await apiRequest("POST", "/api/auth/login", credentials);
+      const res = await apiRequest("POST", "/api/login", credentials);
       return await res.json();
     },
     onSuccess: (data) => {
       setUser(data);
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me"] });
       toast({
         title: "Welcome back!",
         description: `Logged in as ${data.name}`,
@@ -76,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Register mutation
   const registerMutation = useMutation({
     mutationFn: async (userData: InsertOrganization) => {
-      const res = await apiRequest("POST", "/api/auth/register", userData);
+      const res = await apiRequest("POST", "/api/register", userData);
       return await res.json();
     },
     onSuccess: (data) => {
@@ -98,11 +98,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Logout mutation
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("POST", "/api/auth/logout", {});
+      await apiRequest("POST", "/api/logout", {});
     },
     onSuccess: () => {
       setUser(null);
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me"] });
       queryClient.clear();
       toast({
         title: "Logged out",

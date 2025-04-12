@@ -15,6 +15,7 @@ import Landing from "@/pages/Landing";
 import MainLayout from "@/layouts/MainLayout";
 import { apiRequest } from "./lib/queryClient";
 import { type Organization } from "@shared/schema";
+import { AuthProvider } from "@/hooks/use-auth";
 
 export type UserContextType = {
   user: Organization | null;
@@ -154,8 +155,10 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Router />
-      <Toaster />
+      <AuthProvider>
+        <Router />
+        <Toaster />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
