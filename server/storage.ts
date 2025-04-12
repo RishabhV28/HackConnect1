@@ -12,8 +12,17 @@ import {
   EquipmentBorrowing,
   InsertEquipmentBorrowing,
   Message,
-  InsertMessage
+  InsertMessage,
+  organizations,
+  services,
+  equipment,
+  connections,
+  serviceRequests,
+  equipmentBorrowings,
+  messages
 } from "@shared/schema";
+import { db } from "./db";
+import { and, asc, count, desc, eq, or, sql } from "drizzle-orm";
 
 export interface IStorage {
   // Organization methods
@@ -408,4 +417,306 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export class DatabaseStorage implements IStorage {
+  // Organization methods
+  async getOrganization(id: number): Promise<Organization | undefined> {
+    const result = await db.query.organizations.findFirst({
+      where: eq(organizations.id, id)
+    });
+    return result || undefined;
+  }
+
+  async getOrganizationByUsername(username: string): Promise<Organization | undefined> {
+    const result = await db.query.organizations.findFirst({
+      where: eq(organizations.username, username)
+    });
+    return result || undefined;
+  }
+
+  async createOrganization(organization: InsertOrganization): Promise<Organization> {
+    const [result] = await db.insert(organizations)
+      .values(organization)
+      .returning();
+    return result;
+  }
+
+  async getAllOrganizations(): Promise<Organization[]> {
+    return await db.query.organizations.findMany();
+  }
+
+  // Service methods
+  async createService(service: InsertService): Promise<Service> {
+    const [result] = await db.insert(services)
+      .values(service)
+      .returning();
+    return result;
+  }
+
+  async getServiceById(id: number): Promise<Service | undefined> {
+    const result = await db.query.services.findFirst({
+      where: eq(services.id, id)
+    });
+    return result || undefined;
+  }
+
+  async getServicesByOrganizationId(organizationId: number): Promise<Service[]> {
+    return await db.query.services.findMany({
+      where: eq(services.organizationId, organizationId)
+    });
+  }
+
+  async getAllServices(): Promise<Service[]> {
+    return await db.query.services.findMany();
+  }
+
+  async updateService(id: number, service: Partial<InsertService>): Promise<Service | undefined> {
+    const [result] = await db.update(services)
+      .set(service)
+      .where(eq(services.id, id))
+      .returning();
+    return result || undefined;
+  }
+
+  async deleteService(id: number): Promise<boolean> {
+    const result = await db.delete(services)
+      .where(eq(services.id, id))
+      .returning();
+    return result.length > 0;
+  }
+
+  // Equipment methods
+  async createEquipment(equipmentData: InsertEquipment): Promise<Equipment> {
+    const [result] = await db.insert(equipment)
+      .values(equipmentData)
+      .returning();
+    return result;
+  }
+
+  async getEquipmentById(id: number): Promise<Equipment | undefined> {
+    const result = await db.query.equipment.findFirst({
+      where: eq(equipment.id, id)
+    });
+    return result || undefined;
+  }
+
+  async getEquipmentByOrganizationId(organizationId: number): Promise<Equipment[]> {
+    return await db.query.equipment.findMany({
+      where: eq(equipment.organizationId, organizationId)
+    });
+  }
+
+  async getAllEquipment(): Promise<Equipment[]> {
+    return await db.query.equipment.findMany();
+  }
+
+  async updateEquipment(id: number, equipmentData: Partial<InsertEquipment>): Promise<Equipment | undefined> {
+    const [result] = await db.update(equipment)
+      .set(equipmentData)
+      .where(eq(equipment.id, id))
+      .returning();
+    return result || undefined;
+  }
+
+  async deleteEquipment(id: number): Promise<boolean> {
+    const result = await db.delete(equipment)
+      .where(eq(equipment.id, id))
+      .returning();
+    return result.length > 0;
+  }
+
+  // Connection methods
+  async createConnection(connection: InsertConnection): Promise<Connection> {
+    const [result] = await db.insert(connections)
+      .values(connection)
+      .returning();
+    return result;
+  }
+
+  async getConnectionById(id: number): Promise<Connection | undefined> {
+    const result = await db.query.connections.findFirst({
+      where: eq(connections.id, id)
+    });
+    return result || undefined;
+  }
+
+  async getConnectionsByOrganizationId(organizationId: number): Promise<Connection[]> {
+    return await db.query.connections.findMany({
+      where: or(
+        eq(connections.requesterId, organizationId),
+        eq(connections.receiverId, organizationId)
+      )
+    });
+  }
+
+  async updateConnectionStatus(id: number, status: string): Promise<Connection | undefined> {
+    const [result] = await db.update(connections)
+      .set({ status })
+      .where(eq(connections.id, id))
+      .returning();
+    return result || undefined;
+  }
+
+  async checkConnection(requesterId: number, receiverId: number): Promise<Connection | undefined> {
+    const result = await db.query.connections.findFirst({
+      where: or(
+        and(
+          eq(connections.requesterId, requesterId),
+          eq(connections.receiverId, receiverId)
+        ),
+        and(
+          eq(connections.requesterId, receiverId),
+          eq(connections.receiverId, requesterId)
+        )
+      )
+    });
+    return result || undefined;
+  }
+
+  // Service request methods
+  async createServiceRequest(request: InsertServiceRequest): Promise<ServiceRequest> {
+    const [result] = await db.insert(serviceRequests)
+      .values(request)
+      .returning();
+    return result;
+  }
+
+  async getServiceRequestById(id: number): Promise<ServiceRequest | undefined> {
+    const result = await db.query.serviceRequests.findFirst({
+      where: eq(serviceRequests.id, id)
+    });
+    return result || undefined;
+  }
+
+  async getServiceRequestsByServiceId(serviceId: number): Promise<ServiceRequest[]> {
+    return await db.query.serviceRequests.findMany({
+      where: eq(serviceRequests.serviceId, serviceId)
+    });
+  }
+
+  async getServiceRequestsByOrganizationId(organizationId: number): Promise<ServiceRequest[]> {
+    // Find all services owned by this organization
+    const servicesResult = await db.query.services.findMany({
+      where: eq(services.organizationId, organizationId),
+      columns: { id: true }
+    });
+    const serviceIds = servicesResult.map(s => s.id);
+
+    // Find requests for this organization's services or made by this organization
+    return await db.query.serviceRequests.findMany({
+      where: or(
+        eq(serviceRequests.requesterId, organizationId),
+        serviceIds.length > 0 ? 
+          sql`${serviceRequests.serviceId} IN (${serviceIds.join(', ')})` : 
+          sql`1 = 0`
+      )
+    });
+  }
+
+  async updateServiceRequestStatus(id: number, status: string): Promise<ServiceRequest | undefined> {
+    const [result] = await db.update(serviceRequests)
+      .set({ status })
+      .where(eq(serviceRequests.id, id))
+      .returning();
+    return result || undefined;
+  }
+
+  // Equipment borrowing methods
+  async createEquipmentBorrowing(borrowing: InsertEquipmentBorrowing): Promise<EquipmentBorrowing> {
+    const [result] = await db.insert(equipmentBorrowings)
+      .values(borrowing)
+      .returning();
+    return result;
+  }
+
+  async getEquipmentBorrowingById(id: number): Promise<EquipmentBorrowing | undefined> {
+    const result = await db.query.equipmentBorrowings.findFirst({
+      where: eq(equipmentBorrowings.id, id)
+    });
+    return result || undefined;
+  }
+
+  async getEquipmentBorrowingsByEquipmentId(equipmentId: number): Promise<EquipmentBorrowing[]> {
+    return await db.query.equipmentBorrowings.findMany({
+      where: eq(equipmentBorrowings.equipmentId, equipmentId)
+    });
+  }
+
+  async getEquipmentBorrowingsByOrganizationId(organizationId: number): Promise<EquipmentBorrowing[]> {
+    // Find all equipment owned by this organization
+    const equipmentResult = await db.query.equipment.findMany({
+      where: eq(equipment.organizationId, organizationId),
+      columns: { id: true }
+    });
+    const equipmentIds = equipmentResult.map(e => e.id);
+
+    // Find borrowings for this organization's equipment or made by this organization
+    return await db.query.equipmentBorrowings.findMany({
+      where: or(
+        eq(equipmentBorrowings.borrowerId, organizationId),
+        equipmentIds.length > 0 ? 
+          sql`${equipmentBorrowings.equipmentId} IN (${equipmentIds.join(', ')})` : 
+          sql`1 = 0`
+      )
+    });
+  }
+
+  async updateEquipmentBorrowingStatus(id: number, status: string): Promise<EquipmentBorrowing | undefined> {
+    const [result] = await db.update(equipmentBorrowings)
+      .set({ status })
+      .where(eq(equipmentBorrowings.id, id))
+      .returning();
+    return result || undefined;
+  }
+
+  // Message methods
+  async createMessage(message: InsertMessage): Promise<Message> {
+    const [result] = await db.insert(messages)
+      .values({ ...message, read: false })
+      .returning();
+    return result;
+  }
+
+  async getMessageById(id: number): Promise<Message | undefined> {
+    const result = await db.query.messages.findFirst({
+      where: eq(messages.id, id)
+    });
+    return result || undefined;
+  }
+
+  async getConversation(organizationId1: number, organizationId2: number): Promise<Message[]> {
+    return await db.query.messages.findMany({
+      where: or(
+        and(
+          eq(messages.senderId, organizationId1),
+          eq(messages.receiverId, organizationId2)
+        ),
+        and(
+          eq(messages.senderId, organizationId2),
+          eq(messages.receiverId, organizationId1)
+        )
+      ),
+      orderBy: asc(messages.createdAt)
+    });
+  }
+
+  async getUnreadMessageCount(organizationId: number): Promise<number> {
+    const result = await db.select({ count: count() })
+      .from(messages)
+      .where(and(
+        eq(messages.receiverId, organizationId),
+        eq(messages.read, false)
+      ));
+    return result[0]?.count || 0;
+  }
+
+  async markMessageAsRead(id: number): Promise<boolean> {
+    const result = await db.update(messages)
+      .set({ read: true })
+      .where(eq(messages.id, id))
+      .returning();
+    return result.length > 0;
+  }
+}
+
+// Change from MemStorage to DatabaseStorage
+export const storage = new DatabaseStorage();
