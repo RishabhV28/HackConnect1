@@ -1,11 +1,18 @@
 import {
-  organizations, Organization, InsertOrganization,
-  services, Service, InsertService,
-  equipment, Equipment, InsertEquipment,
-  serviceRequests, ServiceRequest, InsertServiceRequest,
-  equipmentRequests, EquipmentRequest, InsertEquipmentRequest,
-  networkConnections, NetworkConnection, InsertNetworkConnection,
-  messages, Message, InsertMessage
+  Organization,
+  InsertOrganization,
+  Service,
+  InsertService,
+  Equipment,
+  InsertEquipment,
+  Connection,
+  InsertConnection,
+  ServiceRequest,
+  InsertServiceRequest,
+  EquipmentBorrowing,
+  InsertEquipmentBorrowing,
+  Message,
+  InsertMessage
 } from "@shared/schema";
 
 export interface IStorage {
@@ -13,399 +20,391 @@ export interface IStorage {
   getOrganization(id: number): Promise<Organization | undefined>;
   getOrganizationByUsername(username: string): Promise<Organization | undefined>;
   createOrganization(organization: InsertOrganization): Promise<Organization>;
-  updateOrganization(id: number, organization: Partial<Organization>): Promise<Organization | undefined>;
+  getAllOrganizations(): Promise<Organization[]>;
   
   // Service methods
-  getService(id: number): Promise<Service | undefined>;
-  getServicesByOrganization(organizationId: number): Promise<Service[]>;
-  getAllServices(): Promise<Service[]>;
   createService(service: InsertService): Promise<Service>;
-  updateService(id: number, service: Partial<Service>): Promise<Service | undefined>;
+  getServiceById(id: number): Promise<Service | undefined>;
+  getServicesByOrganizationId(organizationId: number): Promise<Service[]>;
+  getAllServices(): Promise<Service[]>;
+  updateService(id: number, service: Partial<InsertService>): Promise<Service | undefined>;
   deleteService(id: number): Promise<boolean>;
   
   // Equipment methods
-  getEquipment(id: number): Promise<Equipment | undefined>;
-  getEquipmentByOrganization(organizationId: number): Promise<Equipment[]>;
-  getAllEquipment(): Promise<Equipment[]>;
   createEquipment(equipment: InsertEquipment): Promise<Equipment>;
-  updateEquipment(id: number, equipment: Partial<Equipment>): Promise<Equipment | undefined>;
+  getEquipmentById(id: number): Promise<Equipment | undefined>;
+  getEquipmentByOrganizationId(organizationId: number): Promise<Equipment[]>;
+  getAllEquipment(): Promise<Equipment[]>;
+  updateEquipment(id: number, equipment: Partial<InsertEquipment>): Promise<Equipment | undefined>;
   deleteEquipment(id: number): Promise<boolean>;
   
-  // Service Request methods
-  getServiceRequest(id: number): Promise<ServiceRequest | undefined>;
-  getServiceRequestsByService(serviceId: number): Promise<ServiceRequest[]>;
-  getServiceRequestsByRequestor(requestorId: number): Promise<ServiceRequest[]>;
+  // Connection methods
+  createConnection(connection: InsertConnection): Promise<Connection>;
+  getConnectionById(id: number): Promise<Connection | undefined>;
+  getConnectionsByOrganizationId(organizationId: number): Promise<Connection[]>;
+  updateConnectionStatus(id: number, status: string): Promise<Connection | undefined>;
+  checkConnection(requesterId: number, receiverId: number): Promise<Connection | undefined>;
+  
+  // Service request methods
   createServiceRequest(request: InsertServiceRequest): Promise<ServiceRequest>;
-  updateServiceRequest(id: number, request: Partial<ServiceRequest>): Promise<ServiceRequest | undefined>;
+  getServiceRequestById(id: number): Promise<ServiceRequest | undefined>;
+  getServiceRequestsByServiceId(serviceId: number): Promise<ServiceRequest[]>;
+  getServiceRequestsByOrganizationId(organizationId: number): Promise<ServiceRequest[]>;
+  updateServiceRequestStatus(id: number, status: string): Promise<ServiceRequest | undefined>;
   
-  // Equipment Request methods
-  getEquipmentRequest(id: number): Promise<EquipmentRequest | undefined>;
-  getEquipmentRequestsByEquipment(equipmentId: number): Promise<EquipmentRequest[]>;
-  getEquipmentRequestsByRequestor(requestorId: number): Promise<EquipmentRequest[]>;
-  createEquipmentRequest(request: InsertEquipmentRequest): Promise<EquipmentRequest>;
-  updateEquipmentRequest(id: number, request: Partial<EquipmentRequest>): Promise<EquipmentRequest | undefined>;
-  
-  // Network Connection methods
-  getNetworkConnection(id: number): Promise<NetworkConnection | undefined>;
-  getNetworkConnectionsByOrganization(organizationId: number): Promise<NetworkConnection[]>;
-  getNetworkConnectionsForOrganization(organizationId: number): Promise<{ connection: NetworkConnection, organization: Organization }[]>;
-  createNetworkConnection(connection: InsertNetworkConnection): Promise<NetworkConnection>;
-  updateNetworkConnection(id: number, connection: Partial<NetworkConnection>): Promise<NetworkConnection | undefined>;
+  // Equipment borrowing methods
+  createEquipmentBorrowing(borrowing: InsertEquipmentBorrowing): Promise<EquipmentBorrowing>;
+  getEquipmentBorrowingById(id: number): Promise<EquipmentBorrowing | undefined>;
+  getEquipmentBorrowingsByEquipmentId(equipmentId: number): Promise<EquipmentBorrowing[]>;
+  getEquipmentBorrowingsByOrganizationId(organizationId: number): Promise<EquipmentBorrowing[]>;
+  updateEquipmentBorrowingStatus(id: number, status: string): Promise<EquipmentBorrowing | undefined>;
   
   // Message methods
-  getMessage(id: number): Promise<Message | undefined>;
-  getMessageConversation(senderId: number, receiverId: number): Promise<Message[]>;
-  getUnreadMessageCount(receiverId: number): Promise<number>;
   createMessage(message: InsertMessage): Promise<Message>;
-  markMessageAsRead(id: number): Promise<Message | undefined>;
+  getMessageById(id: number): Promise<Message | undefined>;
+  getConversation(organizationId1: number, organizationId2: number): Promise<Message[]>;
+  getUnreadMessageCount(organizationId: number): Promise<number>;
+  markMessageAsRead(id: number): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
   private organizations: Map<number, Organization>;
   private services: Map<number, Service>;
   private equipment: Map<number, Equipment>;
+  private connections: Map<number, Connection>;
   private serviceRequests: Map<number, ServiceRequest>;
-  private equipmentRequests: Map<number, EquipmentRequest>;
-  private networkConnections: Map<number, NetworkConnection>;
+  private equipmentBorrowings: Map<number, EquipmentBorrowing>;
   private messages: Map<number, Message>;
   
-  private currentOrganizationId: number;
-  private currentServiceId: number;
-  private currentEquipmentId: number;
-  private currentServiceRequestId: number;
-  private currentEquipmentRequestId: number;
-  private currentNetworkConnectionId: number;
-  private currentMessageId: number;
-
+  private organizationId: number;
+  private serviceId: number;
+  private equipmentId: number;
+  private connectionId: number;
+  private serviceRequestId: number;
+  private equipmentBorrowingId: number;
+  private messageId: number;
+  
   constructor() {
     this.organizations = new Map();
     this.services = new Map();
     this.equipment = new Map();
+    this.connections = new Map();
     this.serviceRequests = new Map();
-    this.equipmentRequests = new Map();
-    this.networkConnections = new Map();
+    this.equipmentBorrowings = new Map();
     this.messages = new Map();
     
-    this.currentOrganizationId = 1;
-    this.currentServiceId = 1;
-    this.currentEquipmentId = 1;
-    this.currentServiceRequestId = 1;
-    this.currentEquipmentRequestId = 1;
-    this.currentNetworkConnectionId = 1;
-    this.currentMessageId = 1;
+    this.organizationId = 1;
+    this.serviceId = 1;
+    this.equipmentId = 1;
+    this.connectionId = 1;
+    this.serviceRequestId = 1;
+    this.equipmentBorrowingId = 1;
+    this.messageId = 1;
     
-    // Initialize with some test data
-    this.initializeTestData();
+    // Add some initial data for testing
+    this.createInitialData();
   }
-
-  private initializeTestData() {
-    // Create test organizations
-    const org1: InsertOrganization = {
-      name: "Computer Science Society",
-      username: "cs_society",
+  
+  private createInitialData() {
+    // Create a few sample organizations
+    const org1 = this.createOrganization({
+      name: "Tech Society",
+      username: "techsociety",
       password: "password123",
-      description: "A society for CS students",
-      email: "cs@university.edu",
-      avatar: "CS"
-    };
+      description: "We are a society focused on technology and innovation.",
+      avatar: "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-1.2.1&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
+    });
     
-    const org2: InsertOrganization = {
-      name: "Film Society",
-      username: "film_society",
+    const org2 = this.createOrganization({
+      name: "Design Club",
+      username: "designclub",
       password: "password123",
-      description: "A society for film enthusiasts",
-      email: "film@university.edu",
-      avatar: "FS"
-    };
+      description: "A creative club focused on design thinking and visual arts.",
+      avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
+    });
     
-    const org3: InsertOrganization = {
-      name: "Engineering Society",
-      username: "eng_society",
-      password: "password123",
-      description: "A society for engineering students",
-      email: "eng@university.edu",
-      avatar: "ES"
-    };
-
-    const csOrg = this.createOrganization(org1);
-    const filmOrg = this.createOrganization(org2);
-    const engOrg = this.createOrganization(org3);
+    // Create some services
+    this.createService({
+      title: "Web Development Workshop",
+      description: "Our society offers a comprehensive workshop on modern web development practices, covering HTML, CSS, JavaScript, and responsive design.",
+      isFree: true,
+      serviceType: "Technical",
+      availability: "Available on request",
+      organizationId: org1.id
+    });
+    
+    this.createService({
+      title: "Digital Marketing Strategy",
+      description: "Strategic marketing consultation for student societies looking to increase their digital presence and event attendance.",
+      isFree: false,
+      serviceType: "Marketing",
+      availability: "Available on weekends",
+      organizationId: org1.id
+    });
+    
+    // Create some equipment
+    this.createEquipment({
+      name: "DSLR Camera",
+      description: "Canon EOS 5D Mark IV with 24-70mm lens",
+      image: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32",
+      isAvailable: true,
+      organizationId: org1.id
+    });
+    
+    this.createEquipment({
+      name: "Sound System",
+      description: "Complete PA system with mixer, speakers, and microphones",
+      image: "https://images.unsplash.com/photo-1547394765-185e1e68f34e",
+      isAvailable: true,
+      organizationId: org1.id
+    });
   }
-
-  // Organization methods
+  
+  // Organization methods implementation
   async getOrganization(id: number): Promise<Organization | undefined> {
     return this.organizations.get(id);
   }
-
+  
   async getOrganizationByUsername(username: string): Promise<Organization | undefined> {
     return Array.from(this.organizations.values()).find(
       (org) => org.username === username
     );
   }
-
+  
   async createOrganization(organization: InsertOrganization): Promise<Organization> {
-    const id = this.currentOrganizationId++;
-    const createdAt = new Date();
-    const newOrganization: Organization = { ...organization, id, createdAt };
+    const id = this.organizationId++;
+    const now = new Date();
+    const newOrganization: Organization = { ...organization, id, createdAt: now };
     this.organizations.set(id, newOrganization);
     return newOrganization;
   }
-
-  async updateOrganization(id: number, organization: Partial<Organization>): Promise<Organization | undefined> {
-    const existingOrganization = this.organizations.get(id);
-    if (!existingOrganization) {
-      return undefined;
-    }
-    
-    const updatedOrganization: Organization = { ...existingOrganization, ...organization };
-    this.organizations.set(id, updatedOrganization);
-    return updatedOrganization;
+  
+  async getAllOrganizations(): Promise<Organization[]> {
+    return Array.from(this.organizations.values());
   }
-
-  // Service methods
-  async getService(id: number): Promise<Service | undefined> {
+  
+  // Service methods implementation
+  async createService(service: InsertService): Promise<Service> {
+    const id = this.serviceId++;
+    const newService: Service = { ...service, id };
+    this.services.set(id, newService);
+    return newService;
+  }
+  
+  async getServiceById(id: number): Promise<Service | undefined> {
     return this.services.get(id);
   }
-
-  async getServicesByOrganization(organizationId: number): Promise<Service[]> {
+  
+  async getServicesByOrganizationId(organizationId: number): Promise<Service[]> {
     return Array.from(this.services.values()).filter(
       (service) => service.organizationId === organizationId
     );
   }
-
+  
   async getAllServices(): Promise<Service[]> {
     return Array.from(this.services.values());
   }
-
-  async createService(service: InsertService): Promise<Service> {
-    const id = this.currentServiceId++;
-    const createdAt = new Date();
-    const newService: Service = { ...service, id, createdAt };
-    this.services.set(id, newService);
-    return newService;
-  }
-
-  async updateService(id: number, service: Partial<Service>): Promise<Service | undefined> {
+  
+  async updateService(id: number, service: Partial<InsertService>): Promise<Service | undefined> {
     const existingService = this.services.get(id);
-    if (!existingService) {
-      return undefined;
-    }
+    if (!existingService) return undefined;
     
-    const updatedService: Service = { ...existingService, ...service };
+    const updatedService = { ...existingService, ...service };
     this.services.set(id, updatedService);
     return updatedService;
   }
-
+  
   async deleteService(id: number): Promise<boolean> {
     return this.services.delete(id);
   }
-
-  // Equipment methods
-  async getEquipment(id: number): Promise<Equipment | undefined> {
+  
+  // Equipment methods implementation
+  async createEquipment(equipment: InsertEquipment): Promise<Equipment> {
+    const id = this.equipmentId++;
+    const newEquipment: Equipment = { ...equipment, id };
+    this.equipment.set(id, newEquipment);
+    return newEquipment;
+  }
+  
+  async getEquipmentById(id: number): Promise<Equipment | undefined> {
     return this.equipment.get(id);
   }
-
-  async getEquipmentByOrganization(organizationId: number): Promise<Equipment[]> {
+  
+  async getEquipmentByOrganizationId(organizationId: number): Promise<Equipment[]> {
     return Array.from(this.equipment.values()).filter(
       (equipment) => equipment.organizationId === organizationId
     );
   }
-
+  
   async getAllEquipment(): Promise<Equipment[]> {
     return Array.from(this.equipment.values());
   }
-
-  async createEquipment(equipment: InsertEquipment): Promise<Equipment> {
-    const id = this.currentEquipmentId++;
-    const createdAt = new Date();
-    const newEquipment: Equipment = { ...equipment, id, createdAt };
-    this.equipment.set(id, newEquipment);
-    return newEquipment;
-  }
-
-  async updateEquipment(id: number, equipment: Partial<Equipment>): Promise<Equipment | undefined> {
+  
+  async updateEquipment(id: number, equipment: Partial<InsertEquipment>): Promise<Equipment | undefined> {
     const existingEquipment = this.equipment.get(id);
-    if (!existingEquipment) {
-      return undefined;
-    }
+    if (!existingEquipment) return undefined;
     
-    const updatedEquipment: Equipment = { ...existingEquipment, ...equipment };
+    const updatedEquipment = { ...existingEquipment, ...equipment };
     this.equipment.set(id, updatedEquipment);
     return updatedEquipment;
   }
-
+  
   async deleteEquipment(id: number): Promise<boolean> {
     return this.equipment.delete(id);
   }
-
-  // Service Request methods
-  async getServiceRequest(id: number): Promise<ServiceRequest | undefined> {
+  
+  // Connection methods implementation
+  async createConnection(connection: InsertConnection): Promise<Connection> {
+    const id = this.connectionId++;
+    const now = new Date();
+    const newConnection: Connection = { ...connection, id, createdAt: now };
+    this.connections.set(id, newConnection);
+    return newConnection;
+  }
+  
+  async getConnectionById(id: number): Promise<Connection | undefined> {
+    return this.connections.get(id);
+  }
+  
+  async getConnectionsByOrganizationId(organizationId: number): Promise<Connection[]> {
+    return Array.from(this.connections.values()).filter(
+      (connection) => 
+        connection.requesterId === organizationId || 
+        connection.receiverId === organizationId
+    );
+  }
+  
+  async updateConnectionStatus(id: number, status: string): Promise<Connection | undefined> {
+    const existingConnection = this.connections.get(id);
+    if (!existingConnection) return undefined;
+    
+    const updatedConnection = { ...existingConnection, status };
+    this.connections.set(id, updatedConnection);
+    return updatedConnection;
+  }
+  
+  async checkConnection(requesterId: number, receiverId: number): Promise<Connection | undefined> {
+    return Array.from(this.connections.values()).find(
+      (connection) => 
+        (connection.requesterId === requesterId && connection.receiverId === receiverId) || 
+        (connection.requesterId === receiverId && connection.receiverId === requesterId)
+    );
+  }
+  
+  // Service request methods implementation
+  async createServiceRequest(request: InsertServiceRequest): Promise<ServiceRequest> {
+    const id = this.serviceRequestId++;
+    const now = new Date();
+    const newRequest: ServiceRequest = { ...request, id, createdAt: now };
+    this.serviceRequests.set(id, newRequest);
+    return newRequest;
+  }
+  
+  async getServiceRequestById(id: number): Promise<ServiceRequest | undefined> {
     return this.serviceRequests.get(id);
   }
-
-  async getServiceRequestsByService(serviceId: number): Promise<ServiceRequest[]> {
+  
+  async getServiceRequestsByServiceId(serviceId: number): Promise<ServiceRequest[]> {
     return Array.from(this.serviceRequests.values()).filter(
       (request) => request.serviceId === serviceId
     );
   }
-
-  async getServiceRequestsByRequestor(requestorId: number): Promise<ServiceRequest[]> {
+  
+  async getServiceRequestsByOrganizationId(organizationId: number): Promise<ServiceRequest[]> {
+    const services = await this.getServicesByOrganizationId(organizationId);
+    const serviceIds = services.map(service => service.id);
+    
     return Array.from(this.serviceRequests.values()).filter(
-      (request) => request.requestorId === requestorId
+      (request) => 
+        serviceIds.includes(request.serviceId) || 
+        request.requesterId === organizationId
     );
   }
-
-  async createServiceRequest(request: InsertServiceRequest): Promise<ServiceRequest> {
-    const id = this.currentServiceRequestId++;
-    const createdAt = new Date();
-    const dateRequested = new Date();
-    const newRequest: ServiceRequest = { ...request, id, createdAt, dateRequested };
-    this.serviceRequests.set(id, newRequest);
-    return newRequest;
-  }
-
-  async updateServiceRequest(id: number, request: Partial<ServiceRequest>): Promise<ServiceRequest | undefined> {
+  
+  async updateServiceRequestStatus(id: number, status: string): Promise<ServiceRequest | undefined> {
     const existingRequest = this.serviceRequests.get(id);
-    if (!existingRequest) {
-      return undefined;
-    }
+    if (!existingRequest) return undefined;
     
-    const updatedRequest: ServiceRequest = { ...existingRequest, ...request };
+    const updatedRequest = { ...existingRequest, status };
     this.serviceRequests.set(id, updatedRequest);
     return updatedRequest;
   }
-
-  // Equipment Request methods
-  async getEquipmentRequest(id: number): Promise<EquipmentRequest | undefined> {
-    return this.equipmentRequests.get(id);
+  
+  // Equipment borrowing methods implementation
+  async createEquipmentBorrowing(borrowing: InsertEquipmentBorrowing): Promise<EquipmentBorrowing> {
+    const id = this.equipmentBorrowingId++;
+    const now = new Date();
+    const newBorrowing: EquipmentBorrowing = { ...borrowing, id, createdAt: now };
+    this.equipmentBorrowings.set(id, newBorrowing);
+    return newBorrowing;
   }
-
-  async getEquipmentRequestsByEquipment(equipmentId: number): Promise<EquipmentRequest[]> {
-    return Array.from(this.equipmentRequests.values()).filter(
-      (request) => request.equipmentId === equipmentId
+  
+  async getEquipmentBorrowingById(id: number): Promise<EquipmentBorrowing | undefined> {
+    return this.equipmentBorrowings.get(id);
+  }
+  
+  async getEquipmentBorrowingsByEquipmentId(equipmentId: number): Promise<EquipmentBorrowing[]> {
+    return Array.from(this.equipmentBorrowings.values()).filter(
+      (borrowing) => borrowing.equipmentId === equipmentId
     );
   }
-
-  async getEquipmentRequestsByRequestor(requestorId: number): Promise<EquipmentRequest[]> {
-    return Array.from(this.equipmentRequests.values()).filter(
-      (request) => request.requestorId === requestorId
-    );
-  }
-
-  async createEquipmentRequest(request: InsertEquipmentRequest): Promise<EquipmentRequest> {
-    const id = this.currentEquipmentRequestId++;
-    const createdAt = new Date();
-    const newRequest: EquipmentRequest = { ...request, id, createdAt };
-    this.equipmentRequests.set(id, newRequest);
-    return newRequest;
-  }
-
-  async updateEquipmentRequest(id: number, request: Partial<EquipmentRequest>): Promise<EquipmentRequest | undefined> {
-    const existingRequest = this.equipmentRequests.get(id);
-    if (!existingRequest) {
-      return undefined;
-    }
+  
+  async getEquipmentBorrowingsByOrganizationId(organizationId: number): Promise<EquipmentBorrowing[]> {
+    const equipment = await this.getEquipmentByOrganizationId(organizationId);
+    const equipmentIds = equipment.map(eq => eq.id);
     
-    const updatedRequest: EquipmentRequest = { ...existingRequest, ...request };
-    this.equipmentRequests.set(id, updatedRequest);
-    return updatedRequest;
-  }
-
-  // Network Connection methods
-  async getNetworkConnection(id: number): Promise<NetworkConnection | undefined> {
-    return this.networkConnections.get(id);
-  }
-
-  async getNetworkConnectionsByOrganization(organizationId: number): Promise<NetworkConnection[]> {
-    return Array.from(this.networkConnections.values()).filter(
-      (connection) => connection.requestorId === organizationId || connection.targetId === organizationId
+    return Array.from(this.equipmentBorrowings.values()).filter(
+      (borrowing) => 
+        equipmentIds.includes(borrowing.equipmentId) || 
+        borrowing.borrowerId === organizationId
     );
   }
-
-  async getNetworkConnectionsForOrganization(organizationId: number): Promise<{ connection: NetworkConnection, organization: Organization }[]> {
-    const connections = await this.getNetworkConnectionsByOrganization(organizationId);
-    return Promise.all(
-      connections.map(async (connection) => {
-        const otherOrgId = connection.requestorId === organizationId 
-          ? connection.targetId 
-          : connection.requestorId;
-        const organization = await this.getOrganization(otherOrgId);
-        if (!organization) {
-          throw new Error(`Organization with ID ${otherOrgId} not found`);
-        }
-        return { connection, organization };
-      })
-    );
-  }
-
-  async createNetworkConnection(connection: InsertNetworkConnection): Promise<NetworkConnection> {
-    // Check if connection already exists
-    const existingConnection = Array.from(this.networkConnections.values()).find(
-      (conn) => 
-        (conn.requestorId === connection.requestorId && conn.targetId === connection.targetId) ||
-        (conn.requestorId === connection.targetId && conn.targetId === connection.requestorId)
-    );
+  
+  async updateEquipmentBorrowingStatus(id: number, status: string): Promise<EquipmentBorrowing | undefined> {
+    const existingBorrowing = this.equipmentBorrowings.get(id);
+    if (!existingBorrowing) return undefined;
     
-    if (existingConnection) {
-      return existingConnection;
-    }
-    
-    const id = this.currentNetworkConnectionId++;
-    const createdAt = new Date();
-    const newConnection: NetworkConnection = { ...connection, id, createdAt };
-    this.networkConnections.set(id, newConnection);
-    return newConnection;
+    const updatedBorrowing = { ...existingBorrowing, status };
+    this.equipmentBorrowings.set(id, updatedBorrowing);
+    return updatedBorrowing;
   }
-
-  async updateNetworkConnection(id: number, connection: Partial<NetworkConnection>): Promise<NetworkConnection | undefined> {
-    const existingConnection = this.networkConnections.get(id);
-    if (!existingConnection) {
-      return undefined;
-    }
-    
-    const updatedConnection: NetworkConnection = { ...existingConnection, ...connection };
-    this.networkConnections.set(id, updatedConnection);
-    return updatedConnection;
-  }
-
-  // Message methods
-  async getMessage(id: number): Promise<Message | undefined> {
-    return this.messages.get(id);
-  }
-
-  async getMessageConversation(senderId: number, receiverId: number): Promise<Message[]> {
-    return Array.from(this.messages.values())
-      .filter(
-        (message) => 
-          (message.senderId === senderId && message.receiverId === receiverId) ||
-          (message.senderId === receiverId && message.receiverId === senderId)
-      )
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  }
-
-  async getUnreadMessageCount(receiverId: number): Promise<number> {
-    return Array.from(this.messages.values())
-      .filter(message => message.receiverId === receiverId && !message.read)
-      .length;
-  }
-
+  
+  // Message methods implementation
   async createMessage(message: InsertMessage): Promise<Message> {
-    const id = this.currentMessageId++;
-    const createdAt = new Date();
-    const newMessage: Message = { ...message, id, createdAt, read: false };
+    const id = this.messageId++;
+    const now = new Date();
+    const newMessage: Message = { ...message, id, read: false, createdAt: now };
     this.messages.set(id, newMessage);
     return newMessage;
   }
-
-  async markMessageAsRead(id: number): Promise<Message | undefined> {
-    const existingMessage = this.messages.get(id);
-    if (!existingMessage) {
-      return undefined;
-    }
+  
+  async getMessageById(id: number): Promise<Message | undefined> {
+    return this.messages.get(id);
+  }
+  
+  async getConversation(organizationId1: number, organizationId2: number): Promise<Message[]> {
+    return Array.from(this.messages.values())
+      .filter(
+        (message) => 
+          (message.senderId === organizationId1 && message.receiverId === organizationId2) || 
+          (message.senderId === organizationId2 && message.receiverId === organizationId1)
+      )
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+  
+  async getUnreadMessageCount(organizationId: number): Promise<number> {
+    return Array.from(this.messages.values())
+      .filter((message) => message.receiverId === organizationId && !message.read)
+      .length;
+  }
+  
+  async markMessageAsRead(id: number): Promise<boolean> {
+    const message = this.messages.get(id);
+    if (!message) return false;
     
-    const updatedMessage: Message = { ...existingMessage, read: true };
-    this.messages.set(id, updatedMessage);
-    return updatedMessage;
+    message.read = true;
+    this.messages.set(id, message);
+    return true;
   }
 }
 

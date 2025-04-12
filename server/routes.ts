@@ -1,41 +1,38 @@
-import express, { type Express, Request, Response } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { 
+  loginSchema, 
   insertOrganizationSchema, 
   insertServiceSchema, 
-  insertEquipmentSchema, 
-  insertServiceRequestSchema, 
-  insertEquipmentRequestSchema, 
-  insertNetworkConnectionSchema, 
-  insertMessageSchema,
-  loginSchema
+  insertEquipmentSchema,
+  insertConnectionSchema,
+  insertServiceRequestSchema,
+  insertEquipmentBorrowingSchema,
+  insertMessageSchema
 } from "@shared/schema";
 import session from "express-session";
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import MemoryStore from "memorystore";
 
+const SessionStore = MemoryStore(session);
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Configure session middleware
-  const SessionStore = MemoryStore(session);
+  // Set up session
   app.use(
     session({
-      secret: process.env.SESSION_SECRET || "hackconnect-session-secret",
+      secret: "hackconnect-secret",
       resave: false,
       saveUninitialized: false,
+      cookie: { secure: process.env.NODE_ENV === "production" },
       store: new SessionStore({
         checkPeriod: 86400000, // prune expired entries every 24h
       }),
-      cookie: {
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-      },
     })
   );
 
-  // Passport configuration
+  // Set up passport
   app.use(passport.initialize());
   app.use(passport.session());
 
@@ -44,32 +41,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const organization = await storage.getOrganizationByUsername(username);
         if (!organization) {
-          return done(null, false, { message: "Invalid username" });
+          return done(null, false, { message: "Incorrect username." });
         }
         if (organization.password !== password) {
-          return done(null, false, { message: "Invalid password" });
+          return done(null, false, { message: "Incorrect password." });
         }
         return done(null, organization);
-      } catch (error) {
-        return done(error);
+      } catch (err) {
+        return done(err);
       }
     })
   );
 
-  passport.serializeUser((org, done) => {
-    done(null, (org as any).id);
+  passport.serializeUser((user: any, done) => {
+    done(null, user.id);
   });
 
   passport.deserializeUser(async (id: number, done) => {
     try {
       const organization = await storage.getOrganization(id);
       done(null, organization);
-    } catch (error) {
-      done(error);
+    } catch (err) {
+      done(err);
     }
   });
 
-  // Auth middleware
+  // Authentication middleware
   const isAuthenticated = (req: Request, res: Response, next: any) => {
     if (req.isAuthenticated()) {
       return next();
@@ -77,599 +74,599 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(401).json({ message: "Unauthorized" });
   };
 
-  // Auth routes
-  app.post("/api/auth/login", (req, res, next) => {
-    try {
-      const parsedBody = loginSchema.parse(req.body);
-      
-      passport.authenticate("local", (err: Error, user: any, info: any) => {
+  // Authentication routes
+  app.post('/api/login', (req, res, next) => {
+    // Validate request
+    const result = loginSchema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ message: "Invalid login data", errors: result.error.errors });
+    }
+
+    passport.authenticate('local', (err: any, user: any, info: any) => {
+      if (err) {
+        return next(err);
+      }
+      if (!user) {
+        return res.status(401).json({ message: info.message || "Login failed" });
+      }
+      req.logIn(user, (err) => {
         if (err) {
           return next(err);
         }
-        if (!user) {
-          return res.status(401).json({ message: info.message });
-        }
-        req.logIn(user, (err) => {
-          if (err) {
-            return next(err);
-          }
-          return res.json({
-            id: user.id,
-            name: user.name,
-            username: user.username,
-            email: user.email,
-            avatar: user.avatar,
-          });
-        });
-      })(req, res, next);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid request" });
-    }
-  });
-
-  app.get("/api/auth/me", isAuthenticated, (req, res) => {
-    const user = req.user as any;
-    res.json({
-      id: user.id,
-      name: user.name,
-      username: user.username,
-      email: user.email,
-      avatar: user.avatar,
-    });
-  });
-
-  app.post("/api/auth/logout", (req, res) => {
-    req.logout((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Error logging out" });
-      }
-      res.json({ message: "Logged out" });
-    });
-  });
-
-  app.post("/api/auth/register", async (req, res) => {
-    try {
-      const organizationData = insertOrganizationSchema.parse(req.body);
-      
-      // Check if username already exists
-      const existingOrg = await storage.getOrganizationByUsername(organizationData.username);
-      if (existingOrg) {
-        return res.status(400).json({ message: "Username already taken" });
-      }
-      
-      const newOrganization = await storage.createOrganization(organizationData);
-      res.status(201).json({
-        id: newOrganization.id,
-        name: newOrganization.name,
-        username: newOrganization.username,
-        email: newOrganization.email,
-        avatar: newOrganization.avatar,
+        return res.json({ message: "Login successful", user });
       });
-    } catch (error) {
-      res.status(400).json({ message: "Invalid organization data" });
-    }
+    })(req, res, next);
+  });
+
+  app.post('/api/logout', (req, res) => {
+    req.logout(() => {
+      res.json({ message: "Logout successful" });
+    });
+  });
+
+  app.get('/api/me', isAuthenticated, (req, res) => {
+    res.json(req.user);
   });
 
   // Organization routes
-  app.get("/api/organizations", async (req, res) => {
-    const organizations = Array.from((await Promise.all(
-      Array.from({ length: storage.currentOrganizationId - 1 }, (_, i) => i + 1)
-        .map(id => storage.getOrganization(id))
-    )).filter(Boolean) as any[]);
-    
-    res.json(organizations.map(org => ({
-      id: org.id,
-      name: org.name,
-      username: org.username,
-      description: org.description,
-      email: org.email,
-      avatar: org.avatar,
-    })));
+  app.post('/api/organizations', async (req, res) => {
+    try {
+      const result = insertOrganizationSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid organization data",
+          errors: result.error.errors
+        });
+      }
+
+      const existingOrg = await storage.getOrganizationByUsername(result.data.username);
+      if (existingOrg) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const organization = await storage.createOrganization(result.data);
+      res.status(201).json(organization);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create organization" });
+    }
   });
 
-  app.get("/api/organizations/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
+  app.get('/api/organizations', async (req, res) => {
+    try {
+      const organizations = await storage.getAllOrganizations();
+      res.json(organizations);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch organizations" });
     }
-    
-    const organization = await storage.getOrganization(id);
-    if (!organization) {
-      return res.status(404).json({ message: "Organization not found" });
+  });
+
+  app.get('/api/organizations/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const organization = await storage.getOrganization(id);
+      if (!organization) {
+        return res.status(404).json({ message: "Organization not found" });
+      }
+      res.json(organization);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch organization" });
     }
-    
-    res.json({
-      id: organization.id,
-      name: organization.name,
-      username: organization.username,
-      description: organization.description,
-      email: organization.email,
-      avatar: organization.avatar,
-    });
   });
 
   // Service routes
-  app.get("/api/services", async (req, res) => {
-    const services = await storage.getAllServices();
-    res.json(services);
-  });
-
-  app.get("/api/services/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
-    const service = await storage.getService(id);
-    if (!service) {
-      return res.status(404).json({ message: "Service not found" });
-    }
-    
-    res.json(service);
-  });
-
-  app.get("/api/organizations/:id/services", async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
-    const services = await storage.getServicesByOrganization(id);
-    res.json(services);
-  });
-
-  app.post("/api/services", isAuthenticated, async (req, res) => {
+  app.post('/api/services', isAuthenticated, async (req, res) => {
     try {
+      const result = insertServiceSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid service data",
+          errors: result.error.errors
+        });
+      }
+
       const user = req.user as any;
-      const serviceData = insertServiceSchema.parse({
-        ...req.body,
-        organizationId: user.id,
+      const service = await storage.createService({
+        ...result.data,
+        organizationId: user.id
       });
-      
-      const service = await storage.createService(serviceData);
       res.status(201).json(service);
     } catch (error) {
-      res.status(400).json({ message: "Invalid service data" });
+      res.status(500).json({ message: "Failed to create service" });
     }
   });
 
-  app.put("/api/services/:id", isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
+  app.get('/api/services', async (req, res) => {
     try {
-      const user = req.user as any;
-      const service = await storage.getService(id);
-      
+      const services = await storage.getAllServices();
+      res.json(services);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch services" });
+    }
+  });
+
+  app.get('/api/services/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const service = await storage.getServiceById(id);
       if (!service) {
         return res.status(404).json({ message: "Service not found" });
       }
-      
-      if (service.organizationId !== user.id) {
-        return res.status(403).json({ message: "Unauthorized" });
-      }
-      
-      const updatedService = await storage.updateService(id, req.body);
-      res.json(updatedService);
+      res.json(service);
     } catch (error) {
-      res.status(400).json({ message: "Invalid service data" });
+      res.status(500).json({ message: "Failed to fetch service" });
     }
   });
 
-  app.delete("/api/services/:id", isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
+  app.get('/api/organizations/:id/services', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const services = await storage.getServicesByOrganizationId(id);
+      res.json(services);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch services" });
     }
-    
-    const user = req.user as any;
-    const service = await storage.getService(id);
-    
-    if (!service) {
-      return res.status(404).json({ message: "Service not found" });
+  });
+
+  app.put('/api/services/:id', isAuthenticated, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const service = await storage.getServiceById(id);
+      if (!service) {
+        return res.status(404).json({ message: "Service not found" });
+      }
+
+      const user = req.user as any;
+      if (service.organizationId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to update this service" });
+      }
+
+      const result = insertServiceSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid service data",
+          errors: result.error.errors
+        });
+      }
+
+      const updatedService = await storage.updateService(id, result.data);
+      res.json(updatedService);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update service" });
     }
-    
-    if (service.organizationId !== user.id) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-    
-    const deleted = await storage.deleteService(id);
-    if (deleted) {
-      return res.status(204).end();
-    } else {
-      return res.status(500).json({ message: "Failed to delete service" });
+  });
+
+  app.delete('/api/services/:id', isAuthenticated, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const service = await storage.getServiceById(id);
+      if (!service) {
+        return res.status(404).json({ message: "Service not found" });
+      }
+
+      const user = req.user as any;
+      if (service.organizationId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to delete this service" });
+      }
+
+      await storage.deleteService(id);
+      res.json({ message: "Service deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete service" });
     }
   });
 
   // Equipment routes
-  app.get("/api/equipment", async (req, res) => {
-    const equipment = await storage.getAllEquipment();
-    res.json(equipment);
-  });
-
-  app.get("/api/equipment/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
-    const equipment = await storage.getEquipment(id);
-    if (!equipment) {
-      return res.status(404).json({ message: "Equipment not found" });
-    }
-    
-    res.json(equipment);
-  });
-
-  app.get("/api/organizations/:id/equipment", async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
-    const equipment = await storage.getEquipmentByOrganization(id);
-    res.json(equipment);
-  });
-
-  app.post("/api/equipment", isAuthenticated, async (req, res) => {
+  app.post('/api/equipment', isAuthenticated, async (req, res) => {
     try {
+      const result = insertEquipmentSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid equipment data",
+          errors: result.error.errors
+        });
+      }
+
       const user = req.user as any;
-      const equipmentData = insertEquipmentSchema.parse({
-        ...req.body,
-        organizationId: user.id,
+      const equipment = await storage.createEquipment({
+        ...result.data,
+        organizationId: user.id
       });
-      
-      const equipment = await storage.createEquipment(equipmentData);
       res.status(201).json(equipment);
     } catch (error) {
-      res.status(400).json({ message: "Invalid equipment data" });
+      res.status(500).json({ message: "Failed to create equipment" });
     }
   });
 
-  app.put("/api/equipment/:id", isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
+  app.get('/api/equipment', async (req, res) => {
     try {
-      const user = req.user as any;
-      const equipment = await storage.getEquipment(id);
-      
+      const equipment = await storage.getAllEquipment();
+      res.json(equipment);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch equipment" });
+    }
+  });
+
+  app.get('/api/equipment/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const equipment = await storage.getEquipmentById(id);
       if (!equipment) {
         return res.status(404).json({ message: "Equipment not found" });
       }
-      
-      if (equipment.organizationId !== user.id) {
-        return res.status(403).json({ message: "Unauthorized" });
+      res.json(equipment);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch equipment" });
+    }
+  });
+
+  app.get('/api/organizations/:id/equipment', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const equipment = await storage.getEquipmentByOrganizationId(id);
+      res.json(equipment);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch equipment" });
+    }
+  });
+
+  app.put('/api/equipment/:id', isAuthenticated, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const equipment = await storage.getEquipmentById(id);
+      if (!equipment) {
+        return res.status(404).json({ message: "Equipment not found" });
       }
-      
-      const updatedEquipment = await storage.updateEquipment(id, req.body);
+
+      const user = req.user as any;
+      if (equipment.organizationId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to update this equipment" });
+      }
+
+      const result = insertEquipmentSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid equipment data",
+          errors: result.error.errors
+        });
+      }
+
+      const updatedEquipment = await storage.updateEquipment(id, result.data);
       res.json(updatedEquipment);
     } catch (error) {
-      res.status(400).json({ message: "Invalid equipment data" });
+      res.status(500).json({ message: "Failed to update equipment" });
     }
   });
 
-  app.delete("/api/equipment/:id", isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
-    const user = req.user as any;
-    const equipment = await storage.getEquipment(id);
-    
-    if (!equipment) {
-      return res.status(404).json({ message: "Equipment not found" });
-    }
-    
-    if (equipment.organizationId !== user.id) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-    
-    const deleted = await storage.deleteEquipment(id);
-    if (deleted) {
-      return res.status(204).end();
-    } else {
-      return res.status(500).json({ message: "Failed to delete equipment" });
-    }
-  });
-
-  // Service Request routes
-  app.get("/api/services/:id/requests", isAuthenticated, async (req, res) => {
-    const serviceId = parseInt(req.params.id);
-    if (isNaN(serviceId)) {
-      return res.status(400).json({ message: "Invalid service ID" });
-    }
-    
-    const user = req.user as any;
-    const service = await storage.getService(serviceId);
-    
-    if (!service) {
-      return res.status(404).json({ message: "Service not found" });
-    }
-    
-    if (service.organizationId !== user.id) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-    
-    const requests = await storage.getServiceRequestsByService(serviceId);
-    res.json(requests);
-  });
-
-  app.post("/api/services/:id/requests", isAuthenticated, async (req, res) => {
-    const serviceId = parseInt(req.params.id);
-    if (isNaN(serviceId)) {
-      return res.status(400).json({ message: "Invalid service ID" });
-    }
-    
+  app.delete('/api/equipment/:id', isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as any;
-      const service = await storage.getService(serviceId);
-      
-      if (!service) {
-        return res.status(404).json({ message: "Service not found" });
-      }
-      
-      if (service.organizationId === user.id) {
-        return res.status(400).json({ message: "Cannot request your own service" });
-      }
-      
-      const requestData = insertServiceRequestSchema.parse({
-        ...req.body,
-        serviceId,
-        requestorId: user.id,
-      });
-      
-      const request = await storage.createServiceRequest(requestData);
-      res.status(201).json(request);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid request data" });
-    }
-  });
-
-  app.put("/api/service-requests/:id", isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
-    try {
-      const user = req.user as any;
-      const request = await storage.getServiceRequest(id);
-      
-      if (!request) {
-        return res.status(404).json({ message: "Request not found" });
-      }
-      
-      const service = await storage.getService(request.serviceId);
-      if (!service) {
-        return res.status(404).json({ message: "Service not found" });
-      }
-      
-      if (service.organizationId !== user.id && request.requestorId !== user.id) {
-        return res.status(403).json({ message: "Unauthorized" });
-      }
-      
-      const updatedRequest = await storage.updateServiceRequest(id, req.body);
-      res.json(updatedRequest);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid request data" });
-    }
-  });
-
-  // Equipment Request routes
-  app.get("/api/equipment/:id/requests", isAuthenticated, async (req, res) => {
-    const equipmentId = parseInt(req.params.id);
-    if (isNaN(equipmentId)) {
-      return res.status(400).json({ message: "Invalid equipment ID" });
-    }
-    
-    const user = req.user as any;
-    const equipment = await storage.getEquipment(equipmentId);
-    
-    if (!equipment) {
-      return res.status(404).json({ message: "Equipment not found" });
-    }
-    
-    if (equipment.organizationId !== user.id) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-    
-    const requests = await storage.getEquipmentRequestsByEquipment(equipmentId);
-    res.json(requests);
-  });
-
-  app.post("/api/equipment/:id/requests", isAuthenticated, async (req, res) => {
-    const equipmentId = parseInt(req.params.id);
-    if (isNaN(equipmentId)) {
-      return res.status(400).json({ message: "Invalid equipment ID" });
-    }
-    
-    try {
-      const user = req.user as any;
-      const equipment = await storage.getEquipment(equipmentId);
-      
+      const id = parseInt(req.params.id);
+      const equipment = await storage.getEquipmentById(id);
       if (!equipment) {
         return res.status(404).json({ message: "Equipment not found" });
       }
-      
-      if (equipment.organizationId === user.id) {
-        return res.status(400).json({ message: "Cannot request your own equipment" });
-      }
-      
-      const requestData = insertEquipmentRequestSchema.parse({
-        ...req.body,
-        equipmentId,
-        requestorId: user.id,
-      });
-      
-      const request = await storage.createEquipmentRequest(requestData);
-      res.status(201).json(request);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid request data" });
-    }
-  });
 
-  app.put("/api/equipment-requests/:id", isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
-    try {
       const user = req.user as any;
-      const request = await storage.getEquipmentRequest(id);
-      
-      if (!request) {
-        return res.status(404).json({ message: "Request not found" });
+      if (equipment.organizationId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to delete this equipment" });
       }
-      
-      const equipment = await storage.getEquipment(request.equipmentId);
-      if (!equipment) {
-        return res.status(404).json({ message: "Equipment not found" });
-      }
-      
-      if (equipment.organizationId !== user.id && request.requestorId !== user.id) {
-        return res.status(403).json({ message: "Unauthorized" });
-      }
-      
-      const updatedRequest = await storage.updateEquipmentRequest(id, req.body);
-      res.json(updatedRequest);
+
+      await storage.deleteEquipment(id);
+      res.json({ message: "Equipment deleted successfully" });
     } catch (error) {
-      res.status(400).json({ message: "Invalid request data" });
+      res.status(500).json({ message: "Failed to delete equipment" });
     }
   });
 
-  // Network Connection routes
-  app.get("/api/network-connections", isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const connections = await storage.getNetworkConnectionsForOrganization(user.id);
-    
-    res.json(connections);
-  });
-
-  app.post("/api/network-connections", isAuthenticated, async (req, res) => {
+  // Connection routes
+  app.post('/api/connections', isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as any;
-      const connectionData = insertNetworkConnectionSchema.parse({
-        ...req.body,
-        requestorId: user.id,
-      });
-      
-      if (connectionData.targetId === user.id) {
-        return res.status(400).json({ message: "Cannot connect with yourself" });
+      const result = insertConnectionSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid connection data",
+          errors: result.error.errors
+        });
       }
-      
-      const connection = await storage.createNetworkConnection(connectionData);
+
+      const user = req.user as any;
+      if (result.data.requesterId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to create connection for other organization" });
+      }
+
+      // Check if connection already exists
+      const existingConnection = await storage.checkConnection(result.data.requesterId, result.data.receiverId);
+      if (existingConnection) {
+        return res.status(400).json({ message: "Connection already exists" });
+      }
+
+      const connection = await storage.createConnection(result.data);
       res.status(201).json(connection);
     } catch (error) {
-      res.status(400).json({ message: "Invalid connection data" });
+      res.status(500).json({ message: "Failed to create connection" });
     }
   });
 
-  app.put("/api/network-connections/:id", isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-    
+  app.get('/api/connections', isAuthenticated, async (req, res) => {
     try {
       const user = req.user as any;
-      const connection = await storage.getNetworkConnection(id);
+      const connections = await storage.getConnectionsByOrganizationId(user.id);
+      res.json(connections);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch connections" });
+    }
+  });
+
+  app.put('/api/connections/:id/status', isAuthenticated, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { status } = req.body;
       
+      if (!status || !['accepted', 'rejected'].includes(status)) {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+
+      const connection = await storage.getConnectionById(id);
       if (!connection) {
         return res.status(404).json({ message: "Connection not found" });
       }
-      
-      if (connection.requestorId !== user.id && connection.targetId !== user.id) {
-        return res.status(403).json({ message: "Unauthorized" });
+
+      const user = req.user as any;
+      if (connection.receiverId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to update this connection" });
       }
-      
-      const updatedConnection = await storage.updateNetworkConnection(id, req.body);
+
+      const updatedConnection = await storage.updateConnectionStatus(id, status);
       res.json(updatedConnection);
     } catch (error) {
-      res.status(400).json({ message: "Invalid connection data" });
+      res.status(500).json({ message: "Failed to update connection status" });
+    }
+  });
+
+  // Service request routes
+  app.post('/api/service-requests', isAuthenticated, async (req, res) => {
+    try {
+      const result = insertServiceRequestSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid service request data",
+          errors: result.error.errors
+        });
+      }
+
+      const user = req.user as any;
+      if (result.data.requesterId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to create service request for other organization" });
+      }
+
+      const service = await storage.getServiceById(result.data.serviceId);
+      if (!service) {
+        return res.status(404).json({ message: "Service not found" });
+      }
+
+      const request = await storage.createServiceRequest(result.data);
+      res.status(201).json(request);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create service request" });
+    }
+  });
+
+  app.get('/api/service-requests', isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      const requests = await storage.getServiceRequestsByOrganizationId(user.id);
+      res.json(requests);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch service requests" });
+    }
+  });
+
+  app.get('/api/services/:id/requests', isAuthenticated, async (req, res) => {
+    try {
+      const serviceId = parseInt(req.params.id);
+      const service = await storage.getServiceById(serviceId);
+      if (!service) {
+        return res.status(404).json({ message: "Service not found" });
+      }
+
+      const user = req.user as any;
+      if (service.organizationId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to view requests for this service" });
+      }
+
+      const requests = await storage.getServiceRequestsByServiceId(serviceId);
+      res.json(requests);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch service requests" });
+    }
+  });
+
+  app.put('/api/service-requests/:id/status', isAuthenticated, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { status } = req.body;
+      
+      if (!status || !['accepted', 'rejected', 'completed'].includes(status)) {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+
+      const request = await storage.getServiceRequestById(id);
+      if (!request) {
+        return res.status(404).json({ message: "Service request not found" });
+      }
+
+      const service = await storage.getServiceById(request.serviceId);
+      if (!service) {
+        return res.status(404).json({ message: "Service not found" });
+      }
+
+      const user = req.user as any;
+      if (service.organizationId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to update this service request" });
+      }
+
+      const updatedRequest = await storage.updateServiceRequestStatus(id, status);
+      res.json(updatedRequest);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update service request status" });
+    }
+  });
+
+  // Equipment borrowing routes
+  app.post('/api/equipment-borrowings', isAuthenticated, async (req, res) => {
+    try {
+      const result = insertEquipmentBorrowingSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid equipment borrowing data",
+          errors: result.error.errors
+        });
+      }
+
+      const user = req.user as any;
+      if (result.data.borrowerId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to create borrowing request for other organization" });
+      }
+
+      const equipment = await storage.getEquipmentById(result.data.equipmentId);
+      if (!equipment) {
+        return res.status(404).json({ message: "Equipment not found" });
+      }
+
+      if (!equipment.isAvailable) {
+        return res.status(400).json({ message: "Equipment is not available" });
+      }
+
+      const borrowing = await storage.createEquipmentBorrowing(result.data);
+      res.status(201).json(borrowing);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create equipment borrowing" });
+    }
+  });
+
+  app.get('/api/equipment-borrowings', isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      const borrowings = await storage.getEquipmentBorrowingsByOrganizationId(user.id);
+      res.json(borrowings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch equipment borrowings" });
+    }
+  });
+
+  app.get('/api/equipment/:id/borrowings', isAuthenticated, async (req, res) => {
+    try {
+      const equipmentId = parseInt(req.params.id);
+      const equipment = await storage.getEquipmentById(equipmentId);
+      if (!equipment) {
+        return res.status(404).json({ message: "Equipment not found" });
+      }
+
+      const user = req.user as any;
+      if (equipment.organizationId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to view borrowings for this equipment" });
+      }
+
+      const borrowings = await storage.getEquipmentBorrowingsByEquipmentId(equipmentId);
+      res.json(borrowings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch equipment borrowings" });
+    }
+  });
+
+  app.put('/api/equipment-borrowings/:id/status', isAuthenticated, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { status } = req.body;
+      
+      if (!status || !['approved', 'rejected', 'returned'].includes(status)) {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+
+      const borrowing = await storage.getEquipmentBorrowingById(id);
+      if (!borrowing) {
+        return res.status(404).json({ message: "Equipment borrowing not found" });
+      }
+
+      const equipment = await storage.getEquipmentById(borrowing.equipmentId);
+      if (!equipment) {
+        return res.status(404).json({ message: "Equipment not found" });
+      }
+
+      const user = req.user as any;
+      if (equipment.organizationId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to update this equipment borrowing" });
+      }
+
+      // Update equipment availability
+      if (status === 'approved') {
+        await storage.updateEquipment(equipment.id, { isAvailable: false });
+      } else if (status === 'returned') {
+        await storage.updateEquipment(equipment.id, { isAvailable: true });
+      }
+
+      const updatedBorrowing = await storage.updateEquipmentBorrowingStatus(id, status);
+      res.json(updatedBorrowing);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update equipment borrowing status" });
     }
   });
 
   // Message routes
-  app.get("/api/messages/:receiverId", isAuthenticated, async (req, res) => {
-    const receiverId = parseInt(req.params.receiverId);
-    if (isNaN(receiverId)) {
-      return res.status(400).json({ message: "Invalid receiver ID" });
-    }
-    
-    const user = req.user as any;
-    const messages = await storage.getMessageConversation(user.id, receiverId);
-    
-    res.json(messages);
-  });
-
-  app.post("/api/messages", isAuthenticated, async (req, res) => {
+  app.post('/api/messages', isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as any;
-      const messageData = insertMessageSchema.parse({
-        ...req.body,
-        senderId: user.id,
-      });
-      
-      if (messageData.receiverId === user.id) {
-        return res.status(400).json({ message: "Cannot send message to yourself" });
+      const result = insertMessageSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid message data",
+          errors: result.error.errors
+        });
       }
-      
-      const message = await storage.createMessage(messageData);
+
+      const user = req.user as any;
+      if (result.data.senderId !== user.id) {
+        return res.status(403).json({ message: "Not authorized to send message as other organization" });
+      }
+
+      const receiver = await storage.getOrganization(result.data.receiverId);
+      if (!receiver) {
+        return res.status(404).json({ message: "Receiver organization not found" });
+      }
+
+      const message = await storage.createMessage(result.data);
       res.status(201).json(message);
     } catch (error) {
-      res.status(400).json({ message: "Invalid message data" });
+      res.status(500).json({ message: "Failed to send message" });
     }
   });
 
-  app.put("/api/messages/:id/read", isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ message: "Invalid ID" });
+  app.get('/api/messages/:organizationId', isAuthenticated, async (req, res) => {
+    try {
+      const otherOrgId = parseInt(req.params.organizationId);
+      const user = req.user as any;
+      
+      const conversation = await storage.getConversation(user.id, otherOrgId);
+      
+      // Mark all messages as read
+      await Promise.all(
+        conversation
+          .filter(msg => msg.receiverId === user.id && !msg.read)
+          .map(msg => storage.markMessageAsRead(msg.id))
+      );
+      
+      res.json(conversation);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch conversation" });
     }
-    
-    const user = req.user as any;
-    const message = await storage.getMessage(id);
-    
-    if (!message) {
-      return res.status(404).json({ message: "Message not found" });
-    }
-    
-    if (message.receiverId !== user.id) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-    
-    const updatedMessage = await storage.markMessageAsRead(id);
-    res.json(updatedMessage);
   });
 
-  // Dashboard stats route
-  app.get("/api/dashboard/stats", isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    
-    const services = await storage.getServicesByOrganization(user.id);
-    const activeServices = services.filter(service => service.status === "active").length;
-    
-    const equipmentItems = await storage.getEquipmentByOrganization(user.id);
-    const equipmentCount = equipmentItems.length;
-    
-    const connections = await storage.getNetworkConnectionsByOrganization(user.id);
-    const networkConnections = connections.filter(connection => connection.status === "connected").length;
-    
-    const unreadMessages = await storage.getUnreadMessageCount(user.id);
-    
-    res.json({
-      activeServices,
-      equipmentCount,
-      networkConnections,
-      unreadMessages
-    });
+  app.get('/api/unread-messages', isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      const count = await storage.getUnreadMessageCount(user.id);
+      res.json({ count });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch unread message count" });
+    }
   });
 
   const httpServer = createServer(app);
