@@ -27,8 +27,8 @@ export function ServiceCard({
     <Card className="hover:shadow-md transition-shadow duration-300">
       <CardHeader className="p-4 flex justify-between items-start">
         <BadgeStatus 
-          variant={service.pricing === "free" ? "free" : "paid"} 
-          label={service.pricing === "free" ? "Free" : "Paid"} 
+          variant={service.isFree ? "free" : "paid"} 
+          label={service.isFree ? "Free" : "Paid"} 
         />
         
         {(onEdit || onDelete) && (

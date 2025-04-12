@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -49,19 +50,17 @@ export default function ServiceForm({
   mode,
 }: ServiceFormProps) {
   const { toast } = useToast();
-  const [isPricingPaid, setIsPricingPaid] = useState(service?.pricing === "paid");
+  const [showPriceField, setShowPriceField] = useState(!service?.isFree);
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       title: service?.title || "",
       description: service?.description || "",
-      type: service?.type || "workshop",
-      pricing: service?.pricing || "free",
+      serviceType: service?.serviceType || "Technical",
+      isFree: service?.isFree ?? true,
       price: service?.price || undefined,
-      availability: service?.availability || "",
-      capacity: service?.capacity || "",
-      status: service?.status || "active",
+      availability: service?.availability || "Available on request",
     },
   });
 
@@ -76,6 +75,7 @@ export default function ServiceForm({
         description: "Your service has been created successfully.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/services"] });
       form.reset();
       onClose();
     },
@@ -90,7 +90,9 @@ export default function ServiceForm({
 
   const updateMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      const res = await apiRequest("PUT", `/api/services/${service?.id}`, data);
+      // In edit mode, service will have an id property
+      const serviceId = service ? (service as any).id : null;
+      const res = await apiRequest("PUT", `/api/services/${serviceId}`, data);
       return await res.json();
     },
     onSuccess: () => {
@@ -99,6 +101,7 @@ export default function ServiceForm({
         description: "Your service has been updated successfully.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/services"] });
       form.reset();
       onClose();
     },
@@ -112,8 +115,8 @@ export default function ServiceForm({
   });
 
   const onSubmit = (data: FormData) => {
-    // If pricing is free, ensure price is null
-    if (data.pricing === "free") {
+    // If service is free, ensure price is null
+    if (data.isFree) {
       data.price = null;
     }
     
@@ -124,12 +127,11 @@ export default function ServiceForm({
     }
   };
 
-  const handlePricingChange = (value: string) => {
-    const isPaid = value === "paid";
-    setIsPricingPaid(isPaid);
+  const handleIsFreeChange = (value: boolean) => {
+    setShowPriceField(!value);
     
     // Reset price if switching to free
-    if (!isPaid) {
+    if (value) {
       form.setValue("price", undefined);
     }
   };
@@ -179,7 +181,7 @@ export default function ServiceForm({
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
-                name="type"
+                name="serviceType"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Type</FormLabel>
@@ -193,14 +195,15 @@ export default function ServiceForm({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="workshop">Workshop</SelectItem>
-                        <SelectItem value="consultation">Consultation</SelectItem>
-                        <SelectItem value="mentorship">Mentorship</SelectItem>
-                        <SelectItem value="design">Design</SelectItem>
-                        <SelectItem value="development">Development</SelectItem>
-                        <SelectItem value="photography">Photography</SelectItem>
-                        <SelectItem value="videography">Videography</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
+                        <SelectItem value="Technical">Technical</SelectItem>
+                        <SelectItem value="Workshop">Workshop</SelectItem>
+                        <SelectItem value="Consultation">Consultation</SelectItem>
+                        <SelectItem value="Mentorship">Mentorship</SelectItem>
+                        <SelectItem value="Design">Design</SelectItem>
+                        <SelectItem value="Development">Development</SelectItem>
+                        <SelectItem value="Photography">Photography</SelectItem>
+                        <SelectItem value="Videography">Videography</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -210,34 +213,44 @@ export default function ServiceForm({
 
               <FormField
                 control={form.control}
-                name="pricing"
+                name="availability"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Pricing</FormLabel>
-                    <Select 
-                      onValueChange={(value) => {
-                        field.onChange(value);
-                        handlePricingChange(value);
-                      }}
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select pricing" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="free">Free</SelectItem>
-                        <SelectItem value="paid">Paid</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <FormLabel>Availability</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Weekdays 9-5, Weekends" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
 
-            {isPricingPaid && (
+            <FormField
+              control={form.control}
+              name="isFree"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                  <div className="space-y-0.5">
+                    <FormLabel>Free Service</FormLabel>
+                    <FormDescription>
+                      Toggle if this service is free or paid
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={(value) => {
+                        field.onChange(value);
+                        handleIsFreeChange(value);
+                      }}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            {showPriceField && (
               <FormField
                 control={form.control}
                 name="price"
@@ -263,58 +276,7 @@ export default function ServiceForm({
               />
             )}
 
-            <FormField
-              control={form.control}
-              name="availability"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Availability</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Weekdays 9-5, Weekends only" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="capacity"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Capacity</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Max 20 participants, 1-on-1 sessions" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="status"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Status</FormLabel>
-                  <Select 
-                    onValueChange={field.onChange} 
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {/* Additional fields removed to match schema */}
 
             <div className="flex justify-end space-x-2">
               <Button variant="outline" type="button" onClick={onClose}>
@@ -322,9 +284,12 @@ export default function ServiceForm({
               </Button>
               <Button 
                 type="submit" 
-                loading={createMutation.isPending || updateMutation.isPending}
+                disabled={createMutation.isPending || updateMutation.isPending}
               >
-                {mode === "create" ? "Create Service" : "Update Service"}
+                {createMutation.isPending || updateMutation.isPending ? 
+                  "Loading..." : 
+                  (mode === "create" ? "Create Service" : "Update Service")
+                }
               </Button>
             </div>
           </form>
