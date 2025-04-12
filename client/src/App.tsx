@@ -11,6 +11,7 @@ import Connections from "@/pages/Connections";
 import Profile from "@/pages/Profile";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
+import Landing from "@/pages/Landing";
 import MainLayout from "@/layouts/MainLayout";
 import { apiRequest } from "./lib/queryClient";
 import { type Organization } from "@shared/schema";
@@ -99,11 +100,7 @@ function Router() {
         </Route>
         
         <Route path="/">
-          <ProtectedRoute>
-            <MainLayout>
-              <Dashboard />
-            </MainLayout>
-          </ProtectedRoute>
+          <Landing />
         </Route>
         
         <Route path="/dashboard">
