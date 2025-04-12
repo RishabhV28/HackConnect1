@@ -21,6 +21,7 @@ export const services = pgTable("services", {
   isFree: boolean("is_free").notNull(),
   serviceType: text("service_type").notNull(),
   availability: text("availability").notNull(),
+  price: integer("price"),
   organizationId: integer("organization_id").notNull().references(() => organizations.id),
 });
 

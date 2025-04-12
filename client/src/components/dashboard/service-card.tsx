@@ -70,14 +70,13 @@ export function ServiceCard({
           <span>{service.availability}</span>
         </div>
         
-        {service.capacity && (
-          <div className="mt-1 flex items-center text-sm text-neutral-500">
-            <Group className="h-4 w-4 mr-1" />
-            <span>{service.capacity}</span>
-          </div>
-        )}
+        {/* Service type display */}
+        <div className="mt-1 flex items-center text-sm text-neutral-500">
+          <Group className="h-4 w-4 mr-1" />
+          <span>{service.serviceType}</span>
+        </div>
         
-        {service.pricing === "paid" && service.price && (
+        {!service.isFree && 'price' in service && service.price && (
           <div className="mt-1 flex items-center text-sm text-neutral-500">
             <Banknote className="h-4 w-4 mr-1" />
             <span>£{service.price}</span>
